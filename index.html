@@ -1,0 +1,1302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>CST LAN AR 3 - Waving</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,600;0,700;1,700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<style>
+:root {
+  --bg: #0b0c14;
+  --panel: rgba(18, 16, 32, 0.85);
+  --ink: #f5f3ff;
+  --mute: #9d9bb0;
+  --hud-accent: #a855f7;
+  --hud-accent-glow: rgba(168, 85, 247, 0.45);
+  --hud-accent-dim: rgba(168, 85, 247, 0.15);
+  --flare: #a855f7;
+  --hud-success: #7fd655;
+  --hud-font-mono: 'JetBrains Mono', monospace;
+  --hud-font-ui: 'Barlow Condensed', sans-serif;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--hud-font-ui);
+  overflow: hidden;
+}
+body {
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+header { padding: 16px 20px 6px; }
+h1 { margin: 0; font-size: 2.3rem; line-height: 1; letter-spacing: 0.02em; }
+header p { margin: 6px 0 0; color: var(--mute); font-size: 1.1rem; }
+#stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  background: radial-gradient(circle at 50% 55%, #1e1333, #0b0c14 75%);
+  overflow: hidden;
+}
+#stage.cam-ar-active { background: transparent !important; }
+#stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+#stage.cam-ar-active canvas { position: relative; z-index: 2; }
+
+/* ---- Cyber-HUD Glassmorphic Loading Screen ---- */
+#loader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background-color: rgba(10, 11, 18, 0.88);
+  background-image:
+    linear-gradient(rgba(168, 85, 247, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(168, 85, 247, 0.05) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: center center;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 10;
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity 0.55s cubic-bezier(0.16, 1, 0.3, 1), transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+}
+#loader.loaded {
+  opacity: 0;
+  transform: scale(1.03);
+  pointer-events: none;
+}
+#loader.hidden { display: none; }
+
+.hud-card {
+  position: relative;
+  width: 100%;
+  max-width: 390px;
+  padding: 24px 20px 22px;
+  background: linear-gradient(145deg, rgba(28, 22, 50, 0.92) 0%, rgba(14, 13, 26, 0.96) 100%);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  border-radius: 8px;
+  box-shadow:
+    0 0 24px rgba(168, 85, 247, 0.18),
+    inset 0 0 16px rgba(168, 85, 247, 0.06),
+    0 16px 40px rgba(0, 0, 0, 0.7);
+  animation: hudCardEnter 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+@keyframes hudCardEnter {
+  0% { opacity: 0; transform: scale(0.94) translateY(12px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* 4 Corner HUD Bracket Ticks */
+.hud-bracket {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--hud-accent);
+  border-style: solid;
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px var(--hud-accent));
+}
+.hud-bracket.tl { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+.hud-bracket.tr { top: -1px; right: -1px; border-width: 2px 2px 0 0; }
+.hud-bracket.bl { bottom: -1px; left: -1px; border-width: 0 0 2px 2px; }
+.hud-bracket.br { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+
+.hud-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.hud-meta-left { display: flex; flex-direction: column; gap: 3px; }
+.hud-sys-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--hud-font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  color: var(--hud-accent);
+  text-transform: uppercase;
+}
+.hud-tag-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hud-accent);
+  box-shadow: 0 0 8px var(--hud-accent);
+  animation: tagBlink 1.4s ease-in-out infinite;
+}
+@keyframes tagBlink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.75); }
+}
+.hud-model-title {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #fff;
+  text-shadow: 0 0 12px rgba(168, 85, 247, 0.4);
+}
+.hud-type-badge {
+  font-family: var(--hud-font-mono);
+  font-size: 0.7rem;
+  padding: 4px 8px;
+  border-radius: 3px;
+  background: var(--hud-accent-dim);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  color: var(--hud-accent);
+  letter-spacing: 0.08em;
+}
+
+/* Holographic Centerpiece with Dual Rotating Rings */
+.holo-centerpiece {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  margin: 6px auto 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.holo-ring-outer {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px dashed rgba(168, 85, 247, 0.65);
+  box-shadow: 0 0 14px rgba(168, 85, 247, 0.25);
+  animation: spinCw 14s linear infinite;
+}
+.holo-ring-inner {
+  position: absolute;
+  inset: 12px;
+  border-radius: 50%;
+  border: 2px dotted rgba(168, 85, 247, 0.85);
+  animation: spinCcw 9s linear infinite;
+}
+.holo-core-glow {
+  position: absolute;
+  inset: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.32) 0%, rgba(168, 85, 247, 0.05) 70%, transparent 100%);
+  filter: blur(4px);
+  animation: corePulse 2.4s ease-in-out infinite;
+}
+.holo-icon-box {
+  position: relative;
+  z-index: 2;
+  width: 58px;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 0 10px var(--hud-accent));
+}
+.holo-icon-box svg { width: 100%; height: 100%; }
+
+@keyframes spinCw { 100% { transform: rotate(360deg); } }
+@keyframes spinCcw { 100% { transform: rotate(-360deg); } }
+@keyframes corePulse {
+  0%, 100% { transform: scale(0.92); opacity: 0.7; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+/* 3-Stage Progress Breadcrumbs */
+.hud-breadcrumbs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+.step-pill {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 4px;
+  font-family: var(--hud-font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  background: rgba(14, 13, 26, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: var(--mute);
+  transition: all 0.3s ease;
+}
+.step-pill.active {
+  border-color: var(--hud-accent);
+  background: rgba(168, 85, 247, 0.14);
+  color: #fff;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.25);
+}
+.step-pill.complete {
+  border-color: rgba(127, 214, 85, 0.6);
+  background: rgba(127, 214, 85, 0.12);
+  color: var(--hud-success);
+}
+.step-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mute);
+  transition: all 0.3s ease;
+}
+.step-pill.active .step-status-dot {
+  background: var(--hud-accent);
+  box-shadow: 0 0 8px var(--hud-accent);
+  animation: dotPulse 1.2s ease-in-out infinite;
+}
+.step-pill.complete .step-status-dot {
+  background: var(--hud-success);
+  box-shadow: 0 0 8px var(--hud-success);
+  animation: none;
+}
+@keyframes dotPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.5; }
+}
+.step-chevron {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.2);
+  user-select: none;
+}
+
+/* Progress Bar & Telemetry Block */
+.hud-progress-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hud-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.95rem;
+}
+.hud-status-label {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+}
+.hud-telemetry-tag {
+  font-family: var(--hud-font-mono);
+  font-size: 0.68rem;
+  color: var(--hud-accent);
+  letter-spacing: 0.1em;
+}
+
+/* Glowing Progress Bar with Laser Shimmer */
+.hud-bar-track {
+  position: relative;
+  height: 9px;
+  background: rgba(10, 8, 20, 0.95);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  border-radius: 5px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+.hud-bar-fill {
+  position: relative;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.7) 0%, var(--hud-accent) 100%);
+  border-radius: 4px;
+  box-shadow: 0 0 14px var(--hud-accent);
+  transition: width 0.16s ease-out;
+}
+.hud-bar-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.7) 50%, transparent 100%);
+  animation: laserShimmer 1.8s infinite;
+}
+@keyframes laserShimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+.hud-bar-laser-head {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: #ffffff;
+  box-shadow: 0 0 10px #ffffff, 0 0 16px var(--hud-accent);
+}
+
+/* Dual Live Metrics Row */
+.hud-metrics-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--hud-font-mono);
+  font-size: 0.75rem;
+  color: var(--mute);
+  padding-top: 2px;
+}
+.metric-left { display: flex; align-items: center; gap: 6px; }
+.metric-icon { color: var(--hud-accent); font-size: 0.7rem; }
+.metric-value { color: #f5f3ff; font-weight: 700; letter-spacing: 0.04em; }
+.metric-right { display: flex; align-items: center; gap: 6px; }
+.metric-label { font-size: 0.68rem; letter-spacing: 0.08em; }
+.hud-pct-badge {
+  color: var(--hud-accent);
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-shadow: 0 0 8px var(--hud-accent);
+}
+
+#retry {
+  display: none;
+  margin-top: 14px;
+  width: 100%;
+  padding: 10px;
+  background: rgba(168, 85, 247, 0.2);
+  color: var(--hud-accent);
+  border: 1px solid var(--hud-accent);
+  font-family: var(--hud-font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* AR Launchers & Overlay */
+.ar-cta {
+  display: none;
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 18px;
+  padding: 22px;
+  background: var(--flare);
+  color: #0b0c14;
+  border: 0;
+  font: inherit;
+  font-size: 1.8rem;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: 4px;
+  z-index: 5;
+  box-shadow: 0 0 24px rgba(168, 85, 247, 0.45);
+}
+.ar-cta:disabled { opacity: .6; cursor: default; }
+.ar-cta:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+#ios-ar img { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+#note { margin: 0; padding: 8px 20px; color: var(--mute); text-align: center; min-height: 2.4em; font-size: 1.05rem; }
+#overlay { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 20; }
+#status { position: absolute; top: calc(14px + env(safe-area-inset-top)); left: 14px; right: 14px; text-align: center; background: rgba(18, 16, 32, 0.88); color: var(--ink); padding: 10px 16px; font-size: 1.2rem; border-radius: 4px; border: 1px solid rgba(168, 85, 247, 0.35); }
+#exit { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); pointer-events: auto; padding: 12px 28px; font: inherit; font-size: 1.2rem; background: rgba(18, 16, 32, 0.9); color: var(--ink); border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 4px; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CST LAN Challenge</h1>
+  <p>Tap Open AR camera, scan the table, and walk 360° around the model.</p>
+</header>
+
+<div id="stage">
+  <div id="loader">
+    <div class="hud-card">
+      <!-- 4 Corner HUD Bracket Ticks -->
+      <span class="hud-bracket tl"></span>
+      <span class="hud-bracket tr"></span>
+      <span class="hud-bracket bl"></span>
+      <span class="hud-bracket br"></span>
+
+      <!-- Card Header -->
+      <div class="hud-card-header">
+        <div class="hud-meta-left">
+          <div class="hud-sys-tag">
+            <span class="hud-tag-pulse"></span>
+            <span>SYS // AR_INITIALIZER v3</span>
+          </div>
+          <h2 id="hud-model-name" class="hud-model-title">Waving</h2>
+        </div>
+        <div class="hud-type-badge">SKELETAL 3D</div>
+      </div>
+
+      <!-- Holographic Centerpiece -->
+      <div class="holo-centerpiece">
+        <!-- Outer Dashed Ring (Clockwise) -->
+        <div class="holo-ring-outer"></div>
+        <!-- Inner Dotted Ring (Counter-Clockwise) -->
+        <div class="holo-ring-inner"></div>
+        <!-- Radial Pulsing Glow Core -->
+        <div class="holo-core-glow"></div>
+        <!-- Center Holographic SVG Icon: Welcoming Waving Cyber Hand with Transmission Waves -->
+        <div class="holo-icon-box">
+          <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <!-- Targeting Radar Circle -->
+            <circle cx="32" cy="32" r="30" stroke="var(--hud-accent)" stroke-opacity="0.3" stroke-width="1" stroke-dasharray="3 3"/>
+            <line x1="32" y1="2" x2="32" y2="8" stroke="var(--hud-accent)" stroke-width="2" stroke-linecap="round"/>
+            <line x1="32" y1="56" x2="32" y2="62" stroke="var(--hud-accent)" stroke-width="2" stroke-linecap="round"/>
+            <line x1="2" y1="32" x2="8" y2="32" stroke="var(--hud-accent)" stroke-width="2" stroke-linecap="round"/>
+            <line x1="56" y1="32" x2="62" y2="32" stroke="var(--hud-accent)" stroke-width="2" stroke-linecap="round"/>
+            <!-- Cyber Greeting Signal Waves -->
+            <path d="M46 16C50 20 52 26 52 32C52 38 50 44 46 48" stroke="var(--hud-accent)" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 4"/>
+            <path d="M52 10C58 16 61 24 61 32C61 40 58 48 52 54" stroke="var(--hud-accent)" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3 5"/>
+            <!-- Cyber Waving Hand & Arm -->
+            <path d="M26 54L27 43H37L38 54H26Z" fill="rgba(168, 85, 247, 0.15)" stroke="var(--hud-accent)" stroke-width="1.8" stroke-linejoin="round"/>
+            <!-- Palm Base -->
+            <path d="M22 43L21 29C21 25 24 23 27 23H37C40 23 43 25 43 29L42 43H22Z" fill="rgba(168, 85, 247, 0.22)" stroke="var(--hud-accent)" stroke-width="2" stroke-linejoin="round"/>
+            <!-- Extended Raised Fingers (Waving Gesture) -->
+            <line x1="25" y1="23" x2="24" y2="13" stroke="var(--hud-accent)" stroke-width="2" stroke-linecap="round"/>
+            <line x1="29.5" y1="23" x2="29" y2="10" stroke="var(--hud-accent)" stroke-width="2" stroke-linecap="round"/>
+            <line x1="34.5" y1="23" x2="35" y2="11" stroke="var(--hud-accent)" stroke-width="2" stroke-linecap="round"/>
+            <line x1="39" y1="23" x2="41" y2="15" stroke="var(--hud-accent)" stroke-width="2" stroke-linecap="round"/>
+            <!-- Extended Thumb -->
+            <path d="M21 34L15 28C14 27 15 25 17 26L21 29" stroke="var(--hud-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <!-- Palm Energy Node Spark -->
+            <circle cx="32" cy="33" r="3" fill="var(--hud-accent)"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 3-Stage Progress Breadcrumbs -->
+      <div class="hud-breadcrumbs">
+        <div id="step-stream" class="step-pill active">
+          <span class="step-status-dot"></span>
+          <span>1. STREAM</span>
+        </div>
+        <div class="step-chevron">▶</div>
+        <div id="step-rigging" class="step-pill pending">
+          <span class="step-status-dot"></span>
+          <span>2. RIGGING</span>
+        </div>
+        <div class="step-chevron">▶</div>
+        <div id="step-ready" class="step-pill pending">
+          <span class="step-status-dot"></span>
+          <span>3. READY</span>
+        </div>
+      </div>
+
+      <!-- Progress Bar & Telemetry Block -->
+      <div class="hud-progress-block">
+        <div class="hud-status-row">
+          <span id="load-text" class="hud-status-label">Streaming Assets…</span>
+          <span id="telemetry-tag" class="hud-telemetry-tag">RX // SYNC</span>
+        </div>
+        <!-- Glowing gradient progress bar with shimmer/laser reflection -->
+        <div class="hud-bar-track">
+          <div id="bar" class="hud-bar-fill">
+            <div class="hud-bar-shimmer"></div>
+            <div class="hud-bar-laser-head"></div>
+          </div>
+        </div>
+        <!-- Dual live metrics row underneath -->
+        <div class="hud-metrics-row">
+          <div class="metric-left">
+            <span class="metric-icon">◈</span>
+            <span id="mb-counter" class="metric-value">0.0 / 110.0 MB</span>
+          </div>
+          <div class="metric-right">
+            <span class="metric-label">TELEMETRY:</span>
+            <span id="pct-badge" class="hud-pct-badge">0%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Retry Button -->
+      <button id="retry">↺ RETRY SYNC</button>
+    </div>
+  </div>
+  <video id="cam-video" playsinline autoplay muted style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;pointer-events:none;"></video>
+  <button id="exit-cam" style="display:none;position:absolute;bottom:calc(20px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);padding:14px 28px;background:rgba(18,16,32,0.92);color:var(--hud-accent);border:1.5px solid var(--hud-accent);border-radius:6px;font-family:var(--hud-font-mono);font-size:0.95rem;font-weight:700;letter-spacing:0.08em;cursor:pointer;z-index:25;box-shadow:0 0 16px rgba(168,85,247,0.4);">✕ CLOSE CAMERA AR</button>
+  <button id="xr" class="ar-cta" disabled>Loading Model…</button>
+  <a id="android-sv" class="ar-cta" href="#">Open AR camera</a>
+  <a id="ios-ar" class="ar-cta" rel="ar" href="models/waving.usdz#allowsContentScaling=1">
+    <img alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
+    Open AR camera
+  </a>
+</div>
+
+<div id="overlay">
+  <div id="status"></div>
+  <button id="exit">Close</button>
+</div>
+<p id="note">Loading animated FBX model from S3…</p>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+// Project Specifications: Configurable parameters
+const HUD_CONFIG = {
+  modelName: 'Waving',
+  modelUrl: 'https://cst-lan.s3.eu-north-1.amazonaws.com/Waving.fbx',
+  fallbackModelUrl: 'Waving.fbx', // Local backup file in project
+  accentColor: '#a855f7',         // Neon Purple / Violet
+  fallbackSizeMB: 110.0
+};
+
+const MODEL_URL = HUD_CONFIG.modelUrl;
+const TARGET_HEIGHT = 0.25; // 25 cm tabletop height (set to 1.8 for life-size)
+
+const $ = id => document.getElementById(id);
+const stage = $('stage'), xrBtn = $('xr'), androidSvBtn = $('android-sv'), iosBtn = $('ios-ar'), note = $('note');
+const loaderEl = $('loader'), loadText = $('load-text'), bar = $('bar'), retryBtn = $('retry');
+const stepStream = $('step-stream'), stepRigging = $('step-rigging'), stepReady = $('step-ready');
+const mbCounter = $('mb-counter'), pctBadge = $('pct-badge'), telemetryTag = $('telemetry-tag');
+const ov = $('overlay'), statusEl = $('status');
+const camVideo = $('cam-video'), exitCamBtn = $('exit-cam');
+let camStream = null;
+
+// Helper to transition the 3-Stage Progress Breadcrumbs
+function setPipelineStage(stageNum) {
+  if (stageNum === 1) {
+    stepStream.className = 'step-pill active';
+    stepRigging.className = 'step-pill pending';
+    stepReady.className = 'step-pill pending';
+  } else if (stageNum === 2) {
+    stepStream.className = 'step-pill complete';
+    stepRigging.className = 'step-pill active';
+    stepReady.className = 'step-pill pending';
+  } else if (stageNum === 3) {
+    stepStream.className = 'step-pill complete';
+    stepRigging.className = 'step-pill complete';
+    stepReady.className = 'step-pill complete';
+  }
+}
+
+// Dynamically bind Project Specifications to DOM & CSS variables
+if ($('hud-model-name')) $('hud-model-name').textContent = HUD_CONFIG.modelName;
+if (HUD_CONFIG.accentColor) {
+  document.documentElement.style.setProperty('--hud-accent', HUD_CONFIG.accentColor);
+  document.documentElement.style.setProperty('--flare', HUD_CONFIG.accentColor);
+}
+
+// ---- Preview Three.js Renderer & Scene ----
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(stage.clientWidth, stage.clientHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+stage.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, stage.clientWidth / Math.max(stage.clientHeight, 1), 0.01, 50);
+camera.position.set(0, 0.20, 0.56);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.12, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 0.22;
+controls.maxDistance = 2.0;
+controls.update();
+
+// Lighting
+scene.add(new THREE.HemisphereLight(0xffffff, 0x3d2856, 2.2));
+const keyLight = new THREE.DirectionalLight(0xf5edff, 2.2);
+keyLight.position.set(1.5, 3.0, 2.0);
+scene.add(keyLight);
+const rimLight = new THREE.DirectionalLight(0xa855f7, 1.2);
+rimLight.position.set(-1.5, 1.5, -2.0);
+scene.add(rimLight);
+
+// Floor grid
+const previewFloor = new THREE.PolarGridHelper(0.28, 8, 4, 48, 0xa855f7, 0x3d1a60);
+scene.add(previewFloor);
+
+// Outer root -> inner fbxWrap
+const modelRoot = new THREE.Group();
+const fbxWrap = new THREE.Group();
+modelRoot.add(fbxWrap);
+scene.add(modelRoot);
+
+let mixer = null;
+let loadedFbx = null;
+let activeClip = null;
+let skinnedMeshes = [];
+let modelReady = false;
+
+// ---- Detect Platforms ----
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = /Android/i.test(navigator.userAgent);
+
+const hasWebXR = !!(navigator.xr && await Promise.race([
+  navigator.xr.isSessionSupported('immersive-ar').catch(() => false),
+  new Promise(r => setTimeout(() => r(false), 2000))
+]));
+
+if (isAndroid && !hasWebXR) {
+  const glbUrl = new URL('models/waving.glb', window.location.href).href;
+  const fallbackUrl = encodeURIComponent(window.location.href);
+  androidSvBtn.href =
+    `intent://arvr.google.com/scene-viewer/1.0?file=${encodeURIComponent(glbUrl)}&mode=ar_only&resizable=false&title=Waving` +
+    `#Intent;scheme=https;package=com.google.android.googlequicksearchbox;action=android.intent.action.VIEW;S.browser_fallback_url=${fallbackUrl};end;`;
+}
+
+function updateButtons() {
+  if (camStream) return;
+  if (isIOS) {
+    xrBtn.style.display = 'none';
+    androidSvBtn.style.display = 'none';
+    iosBtn.style.display = 'block';
+    if (modelReady) note.textContent = 'Tap Open AR camera, scan the real table, and walk 360° around the model.';
+  } else {
+    // Android, Desktop, or other browsers: always provide active AR button
+    xrBtn.style.display = 'block';
+    androidSvBtn.style.display = 'none';
+    iosBtn.style.display = 'none';
+    xrBtn.disabled = !modelReady;
+    xrBtn.textContent = modelReady ? 'Open AR camera' : 'Loading Model…';
+    if (modelReady) {
+      note.textContent = hasWebXR
+        ? 'Tap Open AR camera, scan the table, then walk 360° around the model.'
+        : 'Tap Open AR camera to place model on your table.';
+    }
+  }
+}
+updateButtons();
+
+function refreshSkeletons() {
+  if (loadedFbx) loadedFbx.updateMatrixWorld(true);
+  for (let i = 0; i < skinnedMeshes.length; i++) {
+    const m = skinnedMeshes[i];
+    if (m.skeleton) {
+      m.skeleton.update();
+      if (m.skeleton.boneTexture) m.skeleton.boneTexture.needsUpdate = true;
+    }
+  }
+}
+
+function startClipOnMixer(targetFbx, clip) {
+  if (!targetFbx || !clip) return null;
+  const m = new THREE.AnimationMixer(targetFbx);
+  const action = m.clipAction(clip);
+  action.reset();
+  action.enabled = true;
+  action.paused = false;
+  action.timeScale = 1;
+  action.setEffectiveWeight(1);
+  action.setLoop(THREE.LoopRepeat, Infinity);
+  action.play();
+  m.update(0.016);
+  refreshSkeletons();
+  return m;
+}
+
+// Compute exact bounding box of posed SkinnedMeshes with fallback
+function computeExactSkinnedBox(root) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  let validCount = 0;
+
+  root.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
+    const pos = o.geometry.attributes.position;
+    if (!pos || pos.count === 0) return;
+    if (o.isSkinnedMesh && o.skeleton) {
+      try { o.skeleton.update(); } catch (_) {}
+    }
+    const step = Math.max(1, Math.floor(pos.count / 1000));
+    for (let i = 0; i < pos.count; i += step) {
+      v.fromBufferAttribute(pos, i);
+      if (o.isSkinnedMesh && typeof o.boneTransform === 'function') {
+        try { o.boneTransform(i, v); } catch (_) {}
+      }
+      v.applyMatrix4(o.matrixWorld);
+      if (isFinite(v.x) && isFinite(v.y) && isFinite(v.z)) {
+        box.expandByPoint(v);
+        validCount++;
+      }
+    }
+  });
+
+  if (validCount === 0 || box.isEmpty()) {
+    box.setFromObject(root);
+  }
+  return box;
+}
+
+// Streaming fetch with live % and MB progress
+async function fetchArrayBufferWithProgress(url, onProgress) {
+  let res;
+  try {
+    res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+  } catch (err) {
+    if (HUD_CONFIG.fallbackModelUrl) {
+      console.warn(`Could not reach ${url}. Trying local fallback ${HUD_CONFIG.fallbackModelUrl}…`);
+      res = await fetch(HUD_CONFIG.fallbackModelUrl);
+    } else {
+      throw err;
+    }
+  }
+  if (!res.ok) {
+    if (HUD_CONFIG.fallbackModelUrl && url !== HUD_CONFIG.fallbackModelUrl) {
+      console.warn(`HTTP ${res.status} on ${url}. Trying local fallback ${HUD_CONFIG.fallbackModelUrl}…`);
+      res = await fetch(HUD_CONFIG.fallbackModelUrl);
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching model`);
+  }
+  const total = Number(res.headers.get('content-length')) || 0;
+  if (!res.body) return await res.arrayBuffer();
+
+  const reader = res.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+    onProgress(loaded, total);
+  }
+  const out = new Uint8Array(loaded);
+  let offset = 0;
+  for (const c of chunks) { out.set(c, offset); offset += c.byteLength; }
+  return out.buffer;
+}
+
+// ---- Load S3 FBX Model WITH Full Embedded Skeletal Animation ----
+async function loadFBXModel() {
+  loaderEl.style.display = 'flex';
+  loaderEl.classList.remove('loaded');
+  loaderEl.classList.remove('hidden');
+  retryBtn.style.display = 'none';
+
+  setPipelineStage(1);
+  loadText.textContent = 'Streaming Assets…';
+  telemetryTag.textContent = 'RX // SYNC';
+  bar.style.width = '3%';
+  mbCounter.textContent = `0.0 / ${HUD_CONFIG.fallbackSizeMB.toFixed(1)} MB`;
+  pctBadge.textContent = '0%';
+  modelReady = false;
+  updateButtons();
+
+  let detectedTotalMB = HUD_CONFIG.fallbackSizeMB;
+
+  try {
+    const buffer = await fetchArrayBufferWithProgress(MODEL_URL, (loaded, total) => {
+      const loadedMB = loaded / 1048576;
+      if (total > 0) {
+        detectedTotalMB = total / 1048576;
+        const rawPct = Math.min(100, Math.round((loaded / total) * 100));
+        const barPct = Math.min(88, Math.round((loaded / total) * 88));
+        bar.style.width = `${barPct}%`;
+        pctBadge.textContent = `${rawPct}%`;
+        mbCounter.textContent = `${loadedMB.toFixed(1)} / ${detectedTotalMB.toFixed(1)} MB`;
+        telemetryTag.textContent = rawPct >= 100 ? 'RX // BUFFERED' : 'RX // STREAMING';
+      } else {
+        const estPct = Math.min(85, Math.round((loadedMB / HUD_CONFIG.fallbackSizeMB) * 85));
+        bar.style.width = `${estPct}%`;
+        pctBadge.textContent = `${estPct}%`;
+        mbCounter.textContent = `${loadedMB.toFixed(1)} / ${HUD_CONFIG.fallbackSizeMB.toFixed(1)} MB`;
+      }
+    });
+
+    // Stage 2: Rigging Skeleton & Embedded Animation Tracks
+    setPipelineStage(2);
+    loadText.textContent = 'Rigging Skeleton…';
+    telemetryTag.textContent = 'SKELETON // BIND';
+    bar.style.width = '94%';
+    pctBadge.textContent = '94%';
+    mbCounter.textContent = `${detectedTotalMB.toFixed(1)} / ${detectedTotalMB.toFixed(1)} MB`;
+    await new Promise(r => setTimeout(r, 40));
+
+    const fbxLoader = new FBXLoader();
+    const basePath = MODEL_URL.substring(0, MODEL_URL.lastIndexOf('/') + 1);
+    const fbx = fbxLoader.parse(buffer, basePath);
+
+    skinnedMeshes = [];
+    fbx.traverse(o => {
+      if (!o.isMesh) return;
+      o.frustumCulled = false;
+      if (o.isSkinnedMesh) skinnedMeshes.push(o);
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach(m => {
+        if (!m) return;
+        if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
+        if (m.shininess !== undefined) m.shininess = Math.min(m.shininess, 25);
+      });
+    });
+
+    if (loadedFbx) fbxWrap.remove(loadedFbx);
+    loadedFbx = fbx;
+    fbxWrap.position.set(0, 0, 0);
+    fbxWrap.rotation.set(0, 0, 0);
+    fbxWrap.scale.set(1, 1, 1);
+    fbxWrap.add(fbx);
+
+    // Start embedded FBX Waving animation
+    if (fbx.animations && fbx.animations.length > 0) {
+      activeClip = fbx.animations.find(a => a.tracks && a.tracks.length > 0) || fbx.animations[0];
+      mixer = startClipOnMixer(fbx, activeClip);
+      console.log('Playing FBX animation:', activeClip.name, 'tracks:', activeClip.tracks.length, 'duration:', activeClip.duration.toFixed(2) + 's');
+    } else {
+      activeClip = null;
+      mixer = null;
+      console.warn('No animation clips found inside FBX.');
+    }
+
+    // Auto-orient upright & scale to 25 cm tabletop height
+    const box0 = computeExactSkinnedBox(fbxWrap);
+    const dx0 = box0.max.x - box0.min.x;
+    const dy0 = box0.max.y - box0.min.y;
+    const dz0 = box0.max.z - box0.min.z;
+    if (dz0 > dy0 * 1.4 && dz0 > dx0) {
+      fbxWrap.rotation.x = -Math.PI / 2;
+      fbxWrap.updateMatrixWorld(true);
+    }
+
+    const box1 = computeExactSkinnedBox(fbxWrap);
+    let rawH = box1.max.y - box1.min.y;
+    if (!isFinite(rawH) || rawH <= 0.001) {
+      const bAlt = new THREE.Box3().setFromObject(fbxWrap);
+      rawH = bAlt.max.y - bAlt.min.y;
+    }
+
+    let s;
+    if (rawH > 20) {
+      s = TARGET_HEIGHT / rawH; // Centimeters scale (e.g. 181cm -> 0.00138 for 0.25m)
+    } else if (rawH > 0.05) {
+      s = TARGET_HEIGHT / rawH; // Meters scale (e.g. 1.81m -> 0.138 for 0.25m)
+    } else {
+      s = 0.138; // Fallback to 0.25m for ~1.81m model
+    }
+
+    fbxWrap.scale.setScalar(s);
+    fbxWrap.updateMatrixWorld(true);
+
+    const box2 = computeExactSkinnedBox(fbxWrap);
+    if (!box2.isEmpty()) {
+      const cx = (box2.min.x + box2.max.x) * 0.5;
+      const cz = (box2.min.z + box2.max.z) * 0.5;
+      fbxWrap.position.set(-cx, -box2.min.y, -cz);
+      fbxWrap.updateMatrixWorld(true);
+    }
+
+    // Stage 3: Ready for AR!
+    setPipelineStage(3);
+    loadText.textContent = 'Ready for AR!';
+    telemetryTag.textContent = 'SYS.ONLINE';
+    bar.style.width = '100%';
+    pctBadge.textContent = '100%';
+    modelReady = true;
+    updateButtons();
+
+    // Smooth fade out with scale 1.03 after brief pause
+    await new Promise(r => setTimeout(r, 450));
+    loaderEl.classList.add('loaded');
+    setTimeout(() => {
+      loaderEl.style.display = 'none';
+    }, 650);
+
+  } catch (err) {
+    console.error('FBX load error:', err);
+    loadText.textContent = 'Load Failure: ' + (err && err.message ? err.message : 'Network/parse error');
+    telemetryTag.textContent = 'ERR_INTERRUPT';
+    bar.style.width = '0%';
+    pctBadge.textContent = 'ERR';
+    retryBtn.style.display = 'inline-block';
+    updateButtons();
+  }
+}
+
+retryBtn.onclick = loadFBXModel;
+loadFBXModel();
+
+// ---- Preview Render & Animation Loop ----
+let lastPreviewTick = performance.now();
+function previewLoop() {
+  const now = performance.now();
+  const dt = Math.min(Math.max((now - lastPreviewTick) / 1000, 0.001), 0.1);
+  lastPreviewTick = now;
+  if (mixer) {
+    mixer.update(dt);
+    refreshSkeletons();
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(previewLoop);
+
+// ---- Camera AR Pass-Through Fallback (Universal WebAR for LAN / HTTP / Desktop) ----
+async function startCameraAR() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error('Camera access requires HTTPS or localhost.');
+  }
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+  } catch (err1) {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  }
+
+  camStream = stream;
+  camVideo.srcObject = stream;
+  await camVideo.play();
+  camVideo.style.display = 'block';
+  previewFloor.visible = false;
+  stage.classList.add('cam-ar-active');
+  exitCamBtn.style.display = 'block';
+  xrBtn.style.display = 'none';
+  if (androidSvBtn) androidSvBtn.style.display = 'none';
+  if (iosBtn) iosBtn.style.display = 'none';
+
+  camera.position.set(0, 0.28, 0.65);
+  controls.target.set(0, 0.12, 0);
+  controls.update();
+  note.textContent = 'Camera AR active! Drag to rotate & position model on your table.';
+}
+
+function stopCameraAR() {
+  if (camStream) {
+    camStream.getTracks().forEach(track => track.stop());
+    camStream = null;
+  }
+  camVideo.srcObject = null;
+  camVideo.style.display = 'none';
+  previewFloor.visible = true;
+  stage.classList.remove('cam-ar-active');
+  exitCamBtn.style.display = 'none';
+  updateButtons();
+}
+exitCamBtn.onclick = stopCameraAR;
+
+// ---- WebXR Immersive Session Runner ----
+let xrSession = null;
+
+async function startXRSession(session) {
+  xrSession = session;
+
+  renderer.setAnimationLoop(null);
+  controls.enabled = false;
+  if (mixer) {
+    mixer.stopAllAction();
+    mixer.uncacheRoot(loadedFbx);
+    mixer = null;
+  }
+
+  const arRenderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: 'high-performance' });
+  arRenderer.setPixelRatio(1);
+  arRenderer.xr.setFramebufferScaleFactor(0.8);
+  arRenderer.setSize(window.innerWidth, window.innerHeight);
+  arRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  arRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  arRenderer.toneMappingExposure = 1.1;
+  arRenderer.xr.enabled = true;
+  Object.assign(arRenderer.domElement.style, { position: 'fixed', inset: '0', zIndex: '0' });
+  document.body.appendChild(arRenderer.domElement);
+
+  const arScene = new THREE.Scene();
+  const arCamera = new THREE.PerspectiveCamera();
+  arScene.add(new THREE.HemisphereLight(0xffffff, 0x3d2856, 2.4));
+  const arKey = new THREE.DirectionalLight(0xf5edff, 2.2);
+  arKey.position.set(1.5, 3.0, 2.0);
+  arScene.add(arKey);
+  const arRim = new THREE.DirectionalLight(0xa855f7, 1.2);
+  arRim.position.set(-1.5, 1.5, -2.0);
+  arScene.add(arRim);
+
+  const arReticle = new THREE.Mesh(
+    new THREE.RingGeometry(0.06, 0.08, 36).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0xa855f7, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+  );
+  arReticle.matrixAutoUpdate = false;
+  arReticle.visible = false;
+  arScene.add(arReticle);
+
+  const arModelRoot = new THREE.Group();
+  arModelRoot.visible = false;
+  arModelRoot.add(fbxWrap);
+  arScene.add(arModelRoot);
+
+  const arMixer = startClipOnMixer(loadedFbx, activeClip);
+
+  let hitSource = null;
+  let refSpace = null;
+  let xrPlaced = false;
+  let stableFrames = 0;
+  let worldAnchor = null;
+  let targetY = 0;
+  let snapFrames = 0;
+  let lastHitPose = null;
+  let lastViewerPose = null;
+
+  function placeCharacterAt(pp, vp) {
+    arModelRoot.position.set(pp.x, pp.y, pp.z);
+    targetY = pp.y;
+    if (vp) {
+      const p = vp.transform.position;
+      arModelRoot.rotation.set(0, Math.atan2(p.x - pp.x, p.z - pp.z), 0);
+    }
+    arModelRoot.visible = true;
+    arReticle.visible = false;
+    xrPlaced = true;
+    snapFrames = 0;
+
+    statusEl.style.display = 'block';
+    statusEl.textContent = 'Model fixed to table! Walk 360° around. (Tap to move)';
+    setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+  }
+
+  session.addEventListener('select', () => {
+    if (lastHitPose) {
+      placeCharacterAt(lastHitPose.transform.position, lastViewerPose);
+      if (typeof lastHitPose.createAnchor === 'function') {
+        lastHitPose.createAnchor().then(a => { worldAnchor = a; }).catch(() => {});
+      }
+    }
+  });
+
+  let cleanedUp = false;
+  function cleanupAR() {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    arRenderer.setAnimationLoop(null);
+    if (hitSource) { try { hitSource.cancel(); } catch (_) {} hitSource = null; }
+    if (arMixer) {
+      arMixer.stopAllAction();
+      arMixer.uncacheRoot(loadedFbx);
+    }
+    arRenderer.domElement.remove();
+    arRenderer.dispose();
+
+    xrSession = null;
+    ov.style.display = 'none';
+
+    modelRoot.add(fbxWrap);
+    modelRoot.visible = true;
+    modelRoot.position.set(0, 0, 0);
+    modelRoot.rotation.set(0, 0, 0);
+    mixer = startClipOnMixer(loadedFbx, activeClip);
+
+    camera.position.set(0, 0.20, 0.56);
+    controls.target.set(0, 0.12, 0);
+    controls.enabled = true;
+    controls.update();
+    onResize();
+    lastPreviewTick = performance.now();
+    renderer.setAnimationLoop(previewLoop);
+  }
+
+  session.addEventListener('end', cleanupAR);
+
+  try {
+    try {
+      arRenderer.xr.setReferenceSpaceType('local-floor');
+    } catch (_) {
+      arRenderer.xr.setReferenceSpaceType('local');
+    }
+    await arRenderer.xr.setSession(session);
+    refSpace = arRenderer.xr.getReferenceSpace();
+  } catch (e) {
+    try { await session.end(); } catch (_) {}
+    cleanupAR();
+    note.textContent = 'Could not attach WebXR session. Try Camera AR instead.';
+    return;
+  }
+
+  session.requestReferenceSpace('viewer')
+    .then(sp => {
+      return session.requestHitTestSource({ space: sp, entityTypes: ['plane'] })
+        .catch(() => session.requestHitTestSource({ space: sp }));
+    })
+    .then(hs => { hitSource = hs; })
+    .catch(() => { hitSource = null; });
+
+  const q = new THREE.Quaternion();
+  const upVec = new THREE.Vector3();
+  const hitMat = new THREE.Matrix4();
+  const lastHitPos = new THREE.Vector3();
+  let lastXrTime = null;
+
+  arRenderer.setAnimationLoop((t, frame) => {
+    const now = (typeof t === 'number' && isFinite(t)) ? t : performance.now();
+    let dt = lastXrTime === null ? 0.016 : (now - lastXrTime) / 1000;
+    lastXrTime = now;
+    if (!isFinite(dt) || dt <= 0) dt = 0.016;
+    if (dt > 0.1) dt = 0.1;
+
+    if (arMixer) {
+      arMixer.update(dt);
+      refreshSkeletons();
+    }
+
+    if (frame) {
+      const vp = frame.getViewerPose(refSpace);
+      if (vp) lastViewerPose = vp;
+
+      if (hitSource) {
+        const hits = frame.getHitTestResults(hitSource);
+        let foundTable = false;
+
+        for (let i = 0; i < hits.length; i++) {
+          const hit = hits[i];
+          const pose = hit.getPose(refSpace);
+          if (!pose) continue;
+
+          const o = pose.transform.orientation;
+          q.set(o.x, o.y, o.z, o.w);
+          upVec.set(0, 1, 0).applyQuaternion(q);
+
+          if (upVec.y > 0.85) {
+            foundTable = true;
+            lastHitPose = pose;
+            hitMat.fromArray(pose.transform.matrix);
+            arReticle.matrix.copy(hitMat);
+
+            const pp = pose.transform.position;
+
+            if (!xrPlaced) {
+              arReticle.visible = true;
+              if (stableFrames === 0 || Math.hypot(pp.x - lastHitPos.x, pp.y - lastHitPos.y, pp.z - lastHitPos.z) < 0.05) {
+                stableFrames++;
+              } else {
+                stableFrames = 1;
+              }
+              lastHitPos.set(pp.x, pp.y, pp.z);
+
+              if (stableFrames >= 60) {
+                placeCharacterAt(pp, vp);
+                if (typeof hit.createAnchor === 'function') {
+                  hit.createAnchor().then(a => { worldAnchor = a; }).catch(() => {});
+                }
+              }
+            } else {
+              if (Math.hypot(pp.x - arModelRoot.position.x, pp.z - arModelRoot.position.z) < 0.45 && Math.abs(pp.y - targetY) < 0.35) {
+                targetY = pp.y;
+              }
+            }
+            break;
+          }
+        }
+
+        if (!foundTable && !xrPlaced) {
+          arReticle.visible = false;
+          stableFrames = 0;
+        }
+      }
+
+      if (xrPlaced) {
+        snapFrames++;
+        arModelRoot.position.y += (targetY - arModelRoot.position.y) * Math.min(1, dt * 10);
+
+        if (worldAnchor && frame.trackedAnchors && frame.trackedAnchors.has(worldAnchor)) {
+          const anchorPose = frame.getPose(worldAnchor.anchorSpace, refSpace);
+          if (anchorPose) {
+            const ap = anchorPose.transform.position;
+            arModelRoot.position.x = ap.x;
+            arModelRoot.position.z = ap.z;
+          }
+        }
+
+        if (snapFrames > 240 && hitSource) {
+          try { hitSource.cancel(); } catch (_) {}
+          hitSource = null;
+        }
+      }
+    }
+
+    arRenderer.render(arScene, arCamera);
+  });
+}
+
+// ---- Main AR Launch Trigger (Resilient Multi-Mode) ----
+xrBtn.onclick = async () => {
+  if (!modelReady || !loadedFbx || xrSession || camStream) return;
+
+  // 1. If WebXR is supported by browser, attempt native 6-DoF ARCore session
+  if (navigator.xr) {
+    ov.style.display = 'block';
+    statusEl.style.display = 'block';
+    statusEl.textContent = 'Scan table… Tap screen to place model.';
+
+    let session = null;
+    try {
+      session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test'],
+        optionalFeatures: ['dom-overlay', 'anchors', 'plane-detection'],
+        domOverlay: { root: ov }
+      });
+    } catch (e1) {
+      console.warn('WebXR level 1 failed, trying level 2:', e1);
+      try {
+        session = await navigator.xr.requestSession('immersive-ar', {
+          optionalFeatures: ['hit-test', 'dom-overlay'],
+          domOverlay: { root: ov }
+        });
+      } catch (e2) {
+        console.warn('WebXR level 2 failed, trying level 3:', e2);
+        try {
+          session = await navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['hit-test']
+          });
+        } catch (e3) {
+          try {
+            session = await navigator.xr.requestSession('immersive-ar');
+          } catch (e4) {
+            console.warn('Native WebXR not available:', e4);
+          }
+        }
+      }
+    }
+
+    if (session) {
+      startXRSession(session);
+      return;
+    }
+    ov.style.display = 'none';
+  }
+
+  // 2. Fallback to Live Camera AR Pass-Through (Universal: works over LAN, HTTP, desktop, mobile!)
+  try {
+    await startCameraAR();
+  } catch (camErr) {
+    console.error('Camera AR error:', camErr);
+    if (isAndroid && androidSvBtn && androidSvBtn.href && androidSvBtn.href.startsWith('intent:')) {
+      window.location.href = androidSvBtn.href;
+      return;
+    }
+    note.textContent = 'Could not open camera: ' + (camErr.message || 'Allow camera permission or host on HTTPS.');
+  }
+};
+
+$('exit').onclick = () => { if (xrSession) xrSession.end(); };
+
+function onResize() {
+  if (xrSession) return;
+  const w = stage.clientWidth;
+  const h = Math.max(stage.clientHeight, 1);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', onResize);
+</script>
+</body>
+</html>
