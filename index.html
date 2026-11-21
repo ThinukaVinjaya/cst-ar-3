@@ -740,43 +740,54 @@ function computeExactSkinnedBox(root) {
   return box;
 }
 
-// Streaming fetch with live % and MB progress
-async function fetchArrayBufferWithProgress(url, onProgress) {
-  let res;
-  try {
-    res = await fetch(url, { mode: 'cors', credentials: 'omit' });
-  } catch (err) {
-    if (HUD_CONFIG.fallbackModelUrl) {
-      console.warn(`Could not reach ${url}. Trying local fallback ${HUD_CONFIG.fallbackModelUrl}…`);
-      res = await fetch(HUD_CONFIG.fallbackModelUrl);
-    } else {
-      throw err;
-    }
+// Streaming fetch with multi-source fallback (GLB -> local FBX -> S3 FBX)
+async function fetchArrayBufferWithProgress(primaryUrl, onProgress) {
+  const tryUrls = [primaryUrl];
+  if (HUD_CONFIG.fallbackModelUrl && !tryUrls.includes(HUD_CONFIG.fallbackModelUrl)) {
+    tryUrls.push(HUD_CONFIG.fallbackModelUrl);
   }
-  if (!res.ok) {
-    if (HUD_CONFIG.fallbackModelUrl && url !== HUD_CONFIG.fallbackModelUrl) {
-      console.warn(`HTTP ${res.status} on ${url}. Trying local fallback ${HUD_CONFIG.fallbackModelUrl}…`);
-      res = await fetch(HUD_CONFIG.fallbackModelUrl);
-    }
-    if (!res.ok) throw new Error(`HTTP ${res.status} fetching model`);
+  if (HUD_CONFIG.s3FbxUrl && !tryUrls.includes(HUD_CONFIG.s3FbxUrl)) {
+    tryUrls.push(HUD_CONFIG.s3FbxUrl);
   }
-  const total = Number(res.headers.get('content-length')) || 0;
-  if (!res.body) return await res.arrayBuffer();
 
-  const reader = res.body.getReader();
-  const chunks = [];
-  let loaded = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    loaded += value.byteLength;
-    onProgress(loaded, total);
+  let lastErr = null;
+  for (const currentUrl of tryUrls) {
+    try {
+      console.log(`Attempting to load model from: ${currentUrl}`);
+      const res = await fetch(currentUrl, { mode: 'cors', credentials: 'omit' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('text/html')) {
+        throw new Error('Server returned HTML 404 instead of 3D asset');
+      }
+
+      const total = Number(res.headers.get('content-length')) || 0;
+      if (!res.body) {
+        const ab = await res.arrayBuffer();
+        return { buffer: ab, loadedUrl: currentUrl };
+      }
+
+      const reader = res.body.getReader();
+      const chunks = [];
+      let loaded = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.byteLength;
+        onProgress(loaded, total);
+      }
+      const out = new Uint8Array(loaded);
+      let offset = 0;
+      for (const c of chunks) { out.set(c, offset); offset += c.byteLength; }
+      return { buffer: out.buffer, loadedUrl: currentUrl };
+    } catch (e) {
+      console.warn(`Source ${currentUrl} failed: ${e.message}`);
+      lastErr = e;
+    }
   }
-  const out = new Uint8Array(loaded);
-  let offset = 0;
-  for (const c of chunks) { out.set(c, offset); offset += c.byteLength; }
-  return out.buffer;
+  throw lastErr || new Error('Could not load 3D model from any available source');
 }
 
 // ---- Load 3D Model WITH Full Embedded Skeletal Animation ----
@@ -798,7 +809,7 @@ async function loadModel() {
   let detectedTotalMB = HUD_CONFIG.fallbackSizeMB;
 
   try {
-    const buffer = await fetchArrayBufferWithProgress(MODEL_URL, (loaded, total) => {
+    const { buffer, loadedUrl } = await fetchArrayBufferWithProgress(MODEL_URL, (loaded, total) => {
       const loadedMB = loaded / 1048576;
       if (total > 0) {
         detectedTotalMB = total / 1048576;
@@ -825,22 +836,33 @@ async function loadModel() {
     mbCounter.textContent = `${detectedTotalMB.toFixed(1)} / ${detectedTotalMB.toFixed(1)} MB`;
     await new Promise(r => setTimeout(r, 40));
 
+    // Inspect first 32 bytes of buffer to detect real file format (never guessing by filename!)
+    const headBytes = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 32));
+    const headStr = String.fromCharCode(...headBytes);
+
     let modelObject;
     let clips = [];
 
-    const isGlb = MODEL_URL.toLowerCase().endsWith('.glb') || MODEL_URL.toLowerCase().endsWith('.gltf');
-    if (isGlb) {
+    if (headStr.trim().startsWith('<')) {
+      throw new Error('Server returned an HTML error page (404 Not Found) instead of 3D model data.');
+    }
+
+    if (headStr.startsWith('glTF')) {
+      // Binary GLTF / GLB format
       const gltfLoader = new GLTFLoader();
       const gltf = await new Promise((resolve, reject) => {
         gltfLoader.parse(buffer, '', resolve, reject);
       });
       modelObject = gltf.scene;
       clips = gltf.animations || [];
-    } else {
+    } else if (headStr.startsWith('Kaydara FBX') || !headStr.startsWith('{')) {
+      // Binary or ASCII FBX format
       const fbxLoader = new FBXLoader();
-      const basePath = MODEL_URL.substring(0, MODEL_URL.lastIndexOf('/') + 1);
+      const basePath = loadedUrl.substring(0, loadedUrl.lastIndexOf('/') + 1);
       modelObject = fbxLoader.parse(buffer, basePath);
       clips = modelObject.animations || [];
+    } else {
+      throw new Error('Unrecognized 3D format: expected GLB or FBX binary.');
     }
 
     skinnedMeshes = [];
