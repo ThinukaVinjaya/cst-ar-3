@@ -763,25 +763,37 @@ async function fetchArrayBufferWithProgress(primaryUrl, onProgress) {
       }
 
       const total = Number(res.headers.get('content-length')) || 0;
+      let ab;
       if (!res.body) {
-        const ab = await res.arrayBuffer();
-        return { buffer: ab, loadedUrl: currentUrl };
+        ab = await res.arrayBuffer();
+      } else {
+        const reader = res.body.getReader();
+        const chunks = [];
+        let loaded = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          loaded += value.byteLength;
+          onProgress(loaded, total);
+        }
+        const out = new Uint8Array(loaded);
+        let offset = 0;
+        for (const c of chunks) { out.set(c, offset); offset += c.byteLength; }
+        ab = out.buffer;
       }
 
-      const reader = res.body.getReader();
-      const chunks = [];
-      let loaded = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.byteLength;
-        onProgress(loaded, total);
+      // Check for Git LFS text pointer or HTML error page
+      const checkBytes = new Uint8Array(ab, 0, Math.min(ab.byteLength, 48));
+      const checkText = String.fromCharCode(...checkBytes);
+      if (checkText.startsWith('version https://git-lfs')) {
+        throw new Error('Downloaded asset is a Git LFS text pointer, not the actual binary 3D model.');
       }
-      const out = new Uint8Array(loaded);
-      let offset = 0;
-      for (const c of chunks) { out.set(c, offset); offset += c.byteLength; }
-      return { buffer: out.buffer, loadedUrl: currentUrl };
+      if (checkText.trim().startsWith('<')) {
+        throw new Error('Server returned an HTML error page instead of 3D asset');
+      }
+
+      return { buffer: ab, loadedUrl: currentUrl };
     } catch (e) {
       console.warn(`Source ${currentUrl} failed: ${e.message}`);
       lastErr = e;
@@ -836,33 +848,29 @@ async function loadModel() {
     mbCounter.textContent = `${detectedTotalMB.toFixed(1)} / ${detectedTotalMB.toFixed(1)} MB`;
     await new Promise(r => setTimeout(r, 40));
 
-    // Inspect first 32 bytes of buffer to detect real file format (never guessing by filename!)
-    const headBytes = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 32));
+    // Inspect buffer to detect real file format (never passing non-FBX to FBXLoader!)
+    const headBytes = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 64));
     const headStr = String.fromCharCode(...headBytes);
 
     let modelObject;
     let clips = [];
 
-    if (headStr.trim().startsWith('<')) {
-      throw new Error('Server returned an HTML error page (404 Not Found) instead of 3D model data.');
-    }
-
     if (headStr.startsWith('glTF')) {
-      // Binary GLTF / GLB format
+      // Binary glTF (.glb)
       const gltfLoader = new GLTFLoader();
       const gltf = await new Promise((resolve, reject) => {
         gltfLoader.parse(buffer, '', resolve, reject);
       });
       modelObject = gltf.scene;
       clips = gltf.animations || [];
-    } else if (headStr.startsWith('Kaydara FBX') || !headStr.startsWith('{')) {
-      // Binary or ASCII FBX format
+    } else if (headStr.includes('Kaydara') || headStr.includes('FBXVersion:')) {
+      // Binary or ASCII FBX (.fbx)
       const fbxLoader = new FBXLoader();
       const basePath = loadedUrl.substring(0, loadedUrl.lastIndexOf('/') + 1);
       modelObject = fbxLoader.parse(buffer, basePath);
       clips = modelObject.animations || [];
     } else {
-      throw new Error('Unrecognized 3D format: expected GLB or FBX binary.');
+      throw new Error('Unrecognized 3D format: expected binary glTF (.glb) or FBX (.fbx).');
     }
 
     skinnedMeshes = [];
