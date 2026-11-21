@@ -511,7 +511,7 @@ header p { margin: 6px 0 0; color: var(--mute); font-size: 1.1rem; }
         <div class="hud-metrics-row">
           <div class="metric-left">
             <span class="metric-icon">◈</span>
-            <span id="mb-counter" class="metric-value">0.0 / 110.0 MB</span>
+            <span id="mb-counter" class="metric-value">0.0 / 3.0 MB</span>
           </div>
           <div class="metric-right">
             <span class="metric-label">TELEMETRY:</span>
@@ -538,20 +538,22 @@ header p { margin: 6px 0 0; color: var(--mute); font-size: 1.1rem; }
   <div id="status"></div>
   <button id="exit">Close</button>
 </div>
-<p id="note">Loading animated FBX model from S3…</p>
+<p id="note">Loading animated 3D model…</p>
 
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // Project Specifications: Configurable parameters
 const HUD_CONFIG = {
   modelName: 'Waving',
-  modelUrl: 'https://cst-lan.s3.eu-north-1.amazonaws.com/Waving.fbx',
+  modelUrl: 'models/waving.glb', // Fast, optimized 3.0MB asset
   fallbackModelUrl: 'Waving.fbx', // Local backup file in project
+  s3FbxUrl: 'https://cst-lan.s3.eu-north-1.amazonaws.com/Waving.fbx',
   accentColor: '#a855f7',         // Neon Purple / Violet
-  fallbackSizeMB: 110.0
+  fallbackSizeMB: 3.0
 };
 
 const MODEL_URL = HUD_CONFIG.modelUrl;
@@ -777,8 +779,8 @@ async function fetchArrayBufferWithProgress(url, onProgress) {
   return out.buffer;
 }
 
-// ---- Load S3 FBX Model WITH Full Embedded Skeletal Animation ----
-async function loadFBXModel() {
+// ---- Load 3D Model WITH Full Embedded Skeletal Animation ----
+async function loadModel() {
   loaderEl.style.display = 'flex';
   loaderEl.classList.remove('loaded');
   loaderEl.classList.remove('hidden');
@@ -823,12 +825,26 @@ async function loadFBXModel() {
     mbCounter.textContent = `${detectedTotalMB.toFixed(1)} / ${detectedTotalMB.toFixed(1)} MB`;
     await new Promise(r => setTimeout(r, 40));
 
-    const fbxLoader = new FBXLoader();
-    const basePath = MODEL_URL.substring(0, MODEL_URL.lastIndexOf('/') + 1);
-    const fbx = fbxLoader.parse(buffer, basePath);
+    let modelObject;
+    let clips = [];
+
+    const isGlb = MODEL_URL.toLowerCase().endsWith('.glb') || MODEL_URL.toLowerCase().endsWith('.gltf');
+    if (isGlb) {
+      const gltfLoader = new GLTFLoader();
+      const gltf = await new Promise((resolve, reject) => {
+        gltfLoader.parse(buffer, '', resolve, reject);
+      });
+      modelObject = gltf.scene;
+      clips = gltf.animations || [];
+    } else {
+      const fbxLoader = new FBXLoader();
+      const basePath = MODEL_URL.substring(0, MODEL_URL.lastIndexOf('/') + 1);
+      modelObject = fbxLoader.parse(buffer, basePath);
+      clips = modelObject.animations || [];
+    }
 
     skinnedMeshes = [];
-    fbx.traverse(o => {
+    modelObject.traverse(o => {
       if (!o.isMesh) return;
       o.frustumCulled = false;
       if (o.isSkinnedMesh) skinnedMeshes.push(o);
@@ -841,21 +857,21 @@ async function loadFBXModel() {
     });
 
     if (loadedFbx) fbxWrap.remove(loadedFbx);
-    loadedFbx = fbx;
+    loadedFbx = modelObject;
     fbxWrap.position.set(0, 0, 0);
     fbxWrap.rotation.set(0, 0, 0);
     fbxWrap.scale.set(1, 1, 1);
-    fbxWrap.add(fbx);
+    fbxWrap.add(modelObject);
 
-    // Start embedded FBX Waving animation
-    if (fbx.animations && fbx.animations.length > 0) {
-      activeClip = fbx.animations.find(a => a.tracks && a.tracks.length > 0) || fbx.animations[0];
-      mixer = startClipOnMixer(fbx, activeClip);
-      console.log('Playing FBX animation:', activeClip.name, 'tracks:', activeClip.tracks.length, 'duration:', activeClip.duration.toFixed(2) + 's');
+    // Start embedded waving animation
+    if (clips && clips.length > 0) {
+      activeClip = clips.find(a => a.tracks && a.tracks.length > 0) || clips[0];
+      mixer = startClipOnMixer(modelObject, activeClip);
+      console.log('Playing animation:', activeClip.name, 'tracks:', activeClip.tracks.length, 'duration:', activeClip.duration.toFixed(2) + 's');
     } else {
       activeClip = null;
       mixer = null;
-      console.warn('No animation clips found inside FBX.');
+      console.warn('No animation clips found inside model.');
     }
 
     // Auto-orient upright & scale to 25 cm tabletop height
@@ -879,9 +895,9 @@ async function loadFBXModel() {
     if (rawH > 20) {
       s = TARGET_HEIGHT / rawH; // Centimeters scale (e.g. 181cm -> 0.00138 for 0.25m)
     } else if (rawH > 0.05) {
-      s = TARGET_HEIGHT / rawH; // Meters scale (e.g. 1.81m -> 0.138 for 0.25m)
+      s = TARGET_HEIGHT / rawH; // Meters scale (e.g. 1.81m -> 0.138 for 0.25m, or 0.25m -> 1.0)
     } else {
-      s = 0.138; // Fallback to 0.25m for ~1.81m model
+      s = 1.0;
     }
 
     fbxWrap.scale.setScalar(s);
@@ -912,7 +928,7 @@ async function loadFBXModel() {
     }, 650);
 
   } catch (err) {
-    console.error('FBX load error:', err);
+    console.error('Model load error:', err);
     loadText.textContent = 'Load Failure: ' + (err && err.message ? err.message : 'Network/parse error');
     telemetryTag.textContent = 'ERR_INTERRUPT';
     bar.style.width = '0%';
@@ -922,8 +938,8 @@ async function loadFBXModel() {
   }
 }
 
-retryBtn.onclick = loadFBXModel;
-loadFBXModel();
+retryBtn.onclick = loadModel;
+loadModel();
 
 // ---- Preview Render & Animation Loop ----
 let lastPreviewTick = performance.now();

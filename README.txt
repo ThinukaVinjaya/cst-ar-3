@@ -4,10 +4,11 @@ CST WebAR Challenge 3 - Waving Animated 3D Model
 
 Model Specifications:
 - Name: Waving
-- Primary S3 Asset: https://cst-lan.s3.eu-north-1.amazonaws.com/Waving.fbx
-- Local Fallback: Waving.fbx (110.0 MB)
-- Native Scaled GLB: models/waving.glb (tabletop 25 cm, 1 to 143 frames)
-- Native Scaled USDZ: models/waving.usdz (tabletop 25 cm with Apple Quick Look anchoring)
+- Primary Asset: models/waving.glb (3.0 MB high-speed asset, 1 to 143 frames)
+- Apple Quick Look USDZ: models/waving.usdz (5.3 MB tabletop-baked asset)
+- S3 Asset URL: https://cst-lan.s3.eu-north-1.amazonaws.com/Waving.fbx
+- Local FBX Fallback: Waving.fbx
+- Tabletop Target Height: 25 cm (0.25 m)
 - Theme: Neon Purple / Violet (#a855f7) Cyber-HUD Glassmorphic UI
 
 AR Viewing Modes Supported:
